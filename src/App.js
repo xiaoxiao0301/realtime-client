@@ -69,26 +69,29 @@ function App() {
   const messageAreaRef = useRef(null);
 
   useEffect(() => {
-    clientSocket.on('initialMessages', (msg) => {
-      setMessages(msg || []);
-    });
+    // clientSocket.on('initialMessages', (msg) => {
+    //   setMessages(msg || []);
+    // });
 
-    clientSocket.on('messageBroadcast', (msg) => {
-      setMessages((prevMessages) => [...prevMessages, msg]);
-    });
+    // clientSocket.on('messageBroadcast', (msg) => {
+    //   setMessages((prevMessages) => [...prevMessages, msg]);
+    // });
 
     // clientSocket.on('messagesCleared', () => {
     //   setMessages([]);
     // });
 
-    clientSocket.on('latestMessagesResponse', (msg) => {
-      setMessages(msg || []);
+    clientSocket.on('latestMessagesResponse', (latestMessages) => {
+      console.log('Received latestMessagesResponse:', latestMessages);
+      if(latestMessages && latestMessages.length > 0) {
+        setMessages((prevMessages) => [...prevMessages, ...latestMessages]);
+      }
     });
 
 
     return () => {
-      clientSocket.off('initialMessages');
-      clientSocket.off('messageBroadcast');
+      // clientSocket.off('initialMessages');
+      // clientSocket.off('messageBroadcast');
       // clientSocket.off('messagesCleared');
       clientSocket.off('latestMessagesResponse');
     }
@@ -97,18 +100,21 @@ function App() {
   const handleSendMessage = () => {
     const messageText = messageAreaRef.current.innerText.trim();
     if(!messageText) return;
-    clientSocket.emit('newMessage', messageText);
-    messageAreaRef.current.innerText = '';
-    setTimeout(() => {
-      const el = messageAreaRef.current;
-      el.focus();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }, 100);
+    // clientSocket.emit('newMessage', messageText);
+    // messageAreaRef.current.innerText = '';
+    // setTimeout(() => {
+    //   const el = messageAreaRef.current;
+    //   el.focus();
+    //   const range = document.createRange();
+    //   range.selectNodeContents(el);
+    //   range.collapse(false);
+    //   const sel = window.getSelection();
+    //   sel.removeAllRanges();
+    //   sel.addRange(range);
+    // }, 100);
+    setMessages((prevMessages) => [...prevMessages, messageText]);
+    clientSocket.emit('postMessage', messageText);
+    // messageAreaRef.current.innerText = ''; // Doesn't Clear after sending
   };  
 
   const handleKeyDown = (e) => {
@@ -119,7 +125,8 @@ function App() {
   }
 
   const handleRefresh = () => {
-    clientSocket.emit('latestMessages');
+    const lastime = messages.length > 0 ? messages[messages.length -1].time : 0;
+    clientSocket.emit('latestMessages', { after: lastime});
   }
 
   const handleUpload = () => {
@@ -131,6 +138,7 @@ function App() {
   }
 
   const handleClear = () => {
+    console.log('Clearing messages', messages);
     setMessages([]);
     // clientSocket.emit('clearMessages');
   }
@@ -162,9 +170,7 @@ function App() {
           onKeyDown={handleKeyDown}
           style={styles.messageArea}
         >
-          {messages.map((msg) => (
-            <div key={msg.id} style={styles.message}> { msg.text } </div>
-          ))}
+          { messages.map(msg => msg.text).join('') }
         </div>
       </div>
     </div>
