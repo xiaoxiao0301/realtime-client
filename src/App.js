@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { FiRefreshCcw, FiUpload, FiDownload, FiTrash2 } from "react-icons/fi";
+import DiffMatchPath from "diff-match-patch";
 
+const dmp = new DiffMatchPath();
 const clientSocket = io("http://localhost:3001");
 
 const styles = {
@@ -67,6 +69,7 @@ const styles = {
 function App() {
   const [messages, setMessages] = useState([]);
   const messageAreaRef = useRef(null);
+  const lastMessageRef = useRef("");
 
   useEffect(() => {
     // clientSocket.on('initialMessages', (msg) => {
@@ -85,15 +88,26 @@ function App() {
       console.log('Received latestMessagesResponse:', latestMessages);
       if(latestMessages && latestMessages.length > 0) {
         setMessages((prevMessages) => [...prevMessages, ...latestMessages]);
+        const lastMsg = latestMessages[latestMessages.length -1];
+        lastMessageRef.current = lastMsg.text;
       }
     });
 
+    // clientSocket.on('patchUpdate', (patchText) => {
+    //   console.log('Received patchUpdate:', patchText);
+    //   const patches = dmp.patch_fromText(patchText);
+    //   const [newMessage, ] = dmp.patch_apply(patches, messageAreaRef.current.innerText);
+    //   messageAreaRef.current.innerText = newMessage;
+    //   setMessages((prevMessages) => [...prevMessages, newMessage]);
+    //   lastMessageRef.current = newMessage;
+    // });
 
     return () => {
       // clientSocket.off('initialMessages');
       // clientSocket.off('messageBroadcast');
       // clientSocket.off('messagesCleared');
       clientSocket.off('latestMessagesResponse');
+      // clientSocket.off('patchUpdate');
     }
   }, []);
 
@@ -112,9 +126,16 @@ function App() {
     //   sel.removeAllRanges();
     //   sel.addRange(range);
     // }, 100);
-    setMessages((prevMessages) => [...prevMessages, messageText]);
-    clientSocket.emit('postMessage', messageText);
+    // setMessages((prevMessages) => [...prevMessages, messageText]);
+    // clientSocket.emit('postMessage', messageText);
     // messageAreaRef.current.innerText = ''; // Doesn't Clear after sending
+    const newText = messageAreaRef.current.innerText;
+    const path = dmp.patch_make(lastMessageRef.current, newText);
+    const patchText = dmp.patch_toText(path);
+    if(patchText.length === 0) return; // No changes
+    clientSocket.emit('patchMessage', patchText, newText);
+    lastMessageRef.current = newText;
+    setMessages((prevMessages) => [...prevMessages, newText]);
   };  
 
   const handleKeyDown = (e) => {
