@@ -1,0 +1,20 @@
+/* 为 contentEditable 元素添加占位符样式 */
+[contenteditable][data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: #999;
+  cursor: text;
+}
+
+[contenteditable][data-placeholder]:empty:focus::before {
+  content: "";
+}
+
+.message-input:empty::before {
+  content: attr(data-placeholder);
+  color: #999;
+  cursor: text;
+}
+
+.message-input:focus:empty::before {
+  content: "";
+}

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
 import { FiRefreshCcw, FiUpload, FiDownload, FiTrash2, FiX } from "react-icons/fi";
-import DiffMatchPath from "diff-match-patch";
+import RealtimeClient from "./RealtimeClient";
+import "./App.css";
 
-const dmp = new DiffMatchPath();
-const clientSocket = io("http://localhost:3001");
+// Use environment variable for WebSocket URL, fallback to localhost for development
+const WS_URL = process.env.REACT_APP_WS_URL || "ws://localhost:8787/ws";
+const clientSocket = new RealtimeClient(WS_URL);
 
 const styles = {
   page: {
@@ -56,6 +57,35 @@ const styles = {
     overflowY: "auto",
     outline: "none",
     whiteSpace: "pre-wrap",
+  },
+  messagesContainer: {
+    flex: 1,
+    minHeight: "250px",
+    border: "1px solid #ddd",
+    borderRadius: "8px",
+    padding: "10px",
+    overflowY: "auto",
+    backgroundColor: "#f9f9f9",
+    marginBottom: "10px",
+  },
+  messageInput: {
+    minHeight: "60px",
+    border: "1px solid #ddd",
+    borderRadius: "8px",
+    padding: "10px",
+    outline: "none",
+    whiteSpace: "pre-wrap",
+    backgroundColor: "#fff",
+    position: "relative",
+  },
+  messageItem: {
+    background: "#fff",
+    padding: "8px 12px",
+    margin: "4px 0",
+    borderRadius: "6px",
+    wordWrap: "break-word",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+    border: "1px solid #e0e0e0",
   },
   message: {
     background: "#f3f3f3",
@@ -146,7 +176,6 @@ function App() {
   const [files, setFiles] = useState([]);
 
   const messageAreaRef = useRef(null);
-  const lastMessageRef = useRef("");
   const fileInputRef = useRef(null);
   
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -155,6 +184,9 @@ function App() {
   const [uploadSuccess, setUploadSuccess] = useState(false);
 
   useEffect(() => {
+    // Connect to WebSocket
+    clientSocket.connect();
+
     // clientSocket.on('initialMessages', (msg) => {
     //   setMessages(msg || []);
     // });
@@ -167,12 +199,27 @@ function App() {
     //   setMessages([]);
     // });
 
+    // 监听实时新消息
+    clientSocket.on('newMessage', (message) => {
+      console.log('Received newMessage:', message);
+      setMessages((prevMessages) => {
+        // 避免重复消息
+        const isDuplicate = prevMessages.some(msg => msg.time === message.time && msg.id === message.id);
+        if (isDuplicate) return prevMessages;
+        return [...prevMessages, message];
+      });
+    });
+
     clientSocket.on('latestMessagesResponse', (latestMessages) => {
       console.log('Received latestMessagesResponse:', latestMessages);
       if(latestMessages && latestMessages.length > 0) {
-        setMessages((prevMessages) => [...prevMessages, ...latestMessages]);
-        const lastMsg = latestMessages[latestMessages.length -1];
-        lastMessageRef.current = lastMsg.text;
+        setMessages((prevMessages) => {
+          // 避免重复消息
+          const newMessages = latestMessages.filter(newMsg => 
+            !prevMessages.some(prevMsg => prevMsg.time === newMsg.time && prevMsg.id === newMsg.id)
+          );
+          return [...prevMessages, ...newMessages];
+        });
       }
     });
 
@@ -197,9 +244,11 @@ function App() {
       // clientSocket.off('initialMessages');
       // clientSocket.off('messageBroadcast');
       // clientSocket.off('messagesCleared');
+      clientSocket.off('newMessage');
       clientSocket.off('latestMessagesResponse');
       // clientSocket.off('patchUpdate');
       clientSocket.off('latestFilesResponse');
+      clientSocket.disconnect();
     }
   }, []);
 
@@ -207,40 +256,36 @@ function App() {
   const handleSendMessage = () => {
     const messageText = messageAreaRef.current.innerText.trim();
     if(!messageText) return;
-    // clientSocket.emit('newMessage', messageText);
-    // messageAreaRef.current.innerText = '';
-    // setTimeout(() => {
-    //   const el = messageAreaRef.current;
-    //   el.focus();
-    //   const range = document.createRange();
-    //   range.selectNodeContents(el);
-    //   range.collapse(false);
-    //   const sel = window.getSelection();
-    //   sel.removeAllRanges();
-    //   sel.addRange(range);
-    // }, 100);
-    // setMessages((prevMessages) => [...prevMessages, messageText]);
-    // clientSocket.emit('postMessage', messageText);
-    // messageAreaRef.current.innerText = ''; // Doesn't Clear after sending
-    const newText = messageAreaRef.current.innerText;
-    const path = dmp.patch_make(lastMessageRef.current, newText);
-    const patchText = dmp.patch_toText(path);
-    if(patchText.length === 0) return; // No changes
-    clientSocket.emit('patchMessage', patchText);
-    lastMessageRef.current = newText;
-    setMessages((prevMessages) => [...prevMessages, newText]);
+    
+    // 发送纯文本消息，不使用patch格式
+    clientSocket.send('postMessage', messageText);
+    
+    // 清空输入框
+    messageAreaRef.current.innerText = '';
+    
+    // 重新聚焦到输入框
+    setTimeout(() => {
+      const el = messageAreaRef.current;
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }, 100);
   };  
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
-    } 
+    }
   }
 
   const handleRefresh = () => {
     const lastime = messages.length > 0 ? messages[messages.length -1].time : 0;
-    clientSocket.emit('latestMessages', { after: lastime});
+    clientSocket.send('latestMessages', { after: lastime});
   }
 
   const handleClear = () => {
@@ -292,7 +337,7 @@ function App() {
         setUploadProgress(progress);
         if(progress >= 100) {
           clearInterval(interval);
-          clientSocket.emit('postFile', fileData);
+          clientSocket.send('postFile', fileData);
           setUploadSuccess(true);
 
           // ✅ 自动刷新文件列表
@@ -314,7 +359,7 @@ function App() {
   // download logic
   const handleDownload = () => {
     const lasttime = files.length > 0 ? files[files.length -1].time : 0;
-    clientSocket.emit('latestFiles', { after: lasttime}); 
+    clientSocket.send('latestFiles', { after: lasttime}); 
     setShowDownloadModal(true);
   }
 
@@ -352,14 +397,25 @@ function App() {
           </button>
         </div>
 
+        {/* 消息显示区域 */}
+        <div style={styles.messagesContainer}>
+          {messages.map((msg, index) => (
+            <div key={`${msg.id}-${msg.time}-${index}`} style={styles.messageItem}>
+              {msg.text}
+            </div>
+          ))}
+        </div>
+        
+        {/* 消息输入区域 */}
         <div
           ref={messageAreaRef}
           contentEditable
           suppressContentEditableWarning
           onKeyDown={handleKeyDown}
-          style={styles.messageArea}
+          style={styles.messageInput}
+          className="message-input"
+          data-placeholder="输入消息，按Enter发送..."
         >
-          { messages.map(msg => msg.text).join('') }
         </div>
 
         {showUploadModal && (<>
